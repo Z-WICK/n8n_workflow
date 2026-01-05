@@ -1,0 +1,158 @@
+{
+  "name": "飞书记账工作流",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "accounting",
+        "options": {
+          "responseMode": "responseNode"
+        }
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook 接收记账数据",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "accounting-webhook"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $env.FEISHU_APP_ID }}\",\n  \"app_secret\": \"{{ $env.FEISHU_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "id": "get-token",
+      "name": "获取飞书Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get token from previous node\nconst tokenResponse = $('获取飞书Token').first().json;\nif (tokenResponse.code !== 0) {\n  throw new Error('获取Token失败: ' + tokenResponse.msg);\n}\nconst token = tokenResponse.tenant_access_token;\n\n// Get original webhook data\nconst input = $('Webhook 接收记账数据').first().json;\n\n// Support multiple input formats\nlet record = {};\nif (input.body) {\n  record = input.body;\n} else {\n  record = input;\n}\n\n// Validate required fields\nconst amount = parseFloat(record.amount);\nif (isNaN(amount)) {\n  throw new Error('Invalid amount: ' + record.amount);\n}\n\n// Build standardized record\nconst now = new Date();\nconst result = {\n  token: token,\n  date: record.date || now.toISOString().split('T')[0],\n  amount: amount,\n  type: amount >= 0 ? '收入' : '支出',\n  category: record.category || '其他',\n  remark: record.remark || record.note || '',\n  created_at: now.toISOString()\n};\n\nreturn [{ json: result }];"
+      },
+      "id": "parse-data",
+      "name": "解析记账数据",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $env.FEISHU_APP_TOKEN }}/tables/{{ $env.FEISHU_TABLE_ID }}/records",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"fields\": {\n    \"日期\": \"{{ $json.date }}\",\n    \"金额\": {{ $json.amount }},\n    \"类型\": \"{{ $json.type }}\",\n    \"类别\": \"{{ $json.category }}\",\n    \"备注\": \"{{ $json.remark }}\",\n    \"创建时间\": \"{{ $json.created_at }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "feishu-create-record",
+      "name": "写入飞书多维表格",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"message\": \"记账成功\",\n  \"data\": {\n    \"date\": \"{{ $('解析记账数据').item.json.date }}\",\n    \"amount\": {{ $('解析记账数据').item.json.amount }},\n    \"category\": \"{{ $('解析记账数据').item.json.category }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "response-success",
+      "name": "返回成功响应",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1120, 300]
+    }
+  ],
+  "connections": {
+    "Webhook 接收记账数据": {
+      "main": [
+        [
+          {
+            "node": "获取飞书Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取飞书Token": {
+      "main": [
+        [
+          {
+            "node": "解析记账数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析记账数据": {
+      "main": [
+        [
+          {
+            "node": "写入飞书多维表格",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "写入飞书多维表格": {
+      "main": [
+        [
+          {
+            "node": "返回成功响应",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "记账",
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "飞书",
+      "createdAt": "2025-01-01T00:00:00.000Z",
+      "updatedAt": "2025-01-01T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 0,
+  "pinData": {}
+}

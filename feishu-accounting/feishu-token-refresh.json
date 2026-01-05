@@ -1,0 +1,83 @@
+{
+  "name": "飞书Token刷新",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "每小时刷新",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $env.FEISHU_APP_ID }}\",\n  \"app_secret\": \"{{ $env.FEISHU_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "id": "get-token",
+      "name": "获取飞书Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract token and store it\nconst response = $input.first().json;\n\nif (response.code !== 0) {\n  throw new Error('Failed to get token: ' + response.msg);\n}\n\nconst token = response.tenant_access_token;\nconst expireTime = response.expire;\n\n// Store in static data for other workflows to use\n$getWorkflowStaticData('global').feishu_token = token;\n$getWorkflowStaticData('global').feishu_token_expire = Date.now() + (expireTime * 1000);\n\nreturn [{\n  json: {\n    success: true,\n    token: token,\n    expire_in: expireTime\n  }\n}];"
+      },
+      "id": "store-token",
+      "name": "存储Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "每小时刷新": {
+      "main": [
+        [
+          {
+            "node": "获取飞书Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取飞书Token": {
+      "main": [
+        [
+          {
+            "node": "存储Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
