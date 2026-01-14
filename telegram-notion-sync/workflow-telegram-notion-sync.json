@@ -1,0 +1,1025 @@
+{
+    "updatedAt": "2026-01-14T07:25:15.060Z",
+    "createdAt": "2026-01-04T14:39:02.099Z",
+    "id": "mex4ERmqLLacDfol",
+    "name": "Telegram频道同步到Notion",
+    "description": null,
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+        {
+            "parameters": {
+                "updates": [
+                    "channel_post"
+                ],
+                "additionalFields": {}
+            },
+            "id": "telegram-trigger",
+            "name": "ChannelTrigger",
+            "type": "n8n-nodes-base.telegramTrigger",
+            "typeVersion": 1.1,
+            "position": [
+                0,
+                300
+            ],
+            "credentials": {
+                "telegramApi": {
+                    "id": "NWqf2cts29NAnfeW",
+                    "name": "Telegram Bot - TG频道同步"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "const msg = $input.first().json;\nconst post = msg.channel_post || msg.message || msg;\n\nconst rawText = post.text || post.caption || \"\";\nconst entities = post.entities || post.caption_entities || [];\n\nfunction parseEntities(text, entities) {\n  if (!entities.length) return { plain: text, richText: [{ type: \"text\", text: { content: text } }] };\n  const sorted = [...entities].sort((a, b) => a.offset - b.offset);\n  const richText = [];\n  let lastEnd = 0;\n  for (const e of sorted) {\n    if (e.offset > lastEnd) {\n      richText.push({ type: \"text\", text: { content: text.substring(lastEnd, e.offset) } });\n    }\n    const content = text.substring(e.offset, e.offset + e.length);\n    if (e.type === \"text_link\" && e.url) {\n      richText.push({ type: \"text\", text: { content, link: { url: e.url } } });\n    } else if (e.type === \"url\") {\n      richText.push({ type: \"text\", text: { content, link: { url: content } } });\n    } else if (e.type === \"bold\") {\n      richText.push({ type: \"text\", text: { content }, annotations: { bold: true } });\n    } else if (e.type === \"italic\") {\n      richText.push({ type: \"text\", text: { content }, annotations: { italic: true } });\n    } else if (e.type === \"code\") {\n      richText.push({ type: \"text\", text: { content }, annotations: { code: true } });\n    } else {\n      richText.push({ type: \"text\", text: { content } });\n    }\n    lastEnd = e.offset + e.length;\n  }\n  if (lastEnd < text.length) {\n    richText.push({ type: \"text\", text: { content: text.substring(lastEnd) } });\n  }\n  return { plain: text, richText };\n}\n\nconst parsed = parseEntities(rawText, entities);\nconst text = parsed.plain;\nconst richText = parsed.richText;\n\nconst timestamp = post.date ? post.date * 1000 : Date.now();\nconst isoDate = new Date(timestamp).toISOString();\n\nlet chatTitle = \"Unknown\";\nif (post.forward_from_chat) chatTitle = post.forward_from_chat.title || \"Unknown\";\nelse if (post.chat) chatTitle = post.chat.title || \"Private\";\n\nconst msgId = post.forward_from_message_id || post.message_id || 0;\nconst chatId = post.forward_from_chat?.id || post.chat?.id || 0;\nconst mediaGroupId = post.media_group_id || null;\n\nlet mediaType = \"文字\";\nlet fileId = null;\nif (post.photo?.length) { mediaType = \"图片\"; fileId = post.photo[post.photo.length-1].file_id; }\nelse if (post.video) { mediaType = \"视频\"; fileId = post.video.file_id; }\nelse if (post.document) { mediaType = \"文件\"; fileId = post.document.file_id; }\n\nconst chatIdStr = String(chatId).replace(\"-100\", \"\");\nconst sourceUrl = chatId && msgId ? `https://t.me/c/${chatIdStr}/${msgId}` : null;\n\nreturn [{ json: { text, richText: JSON.stringify(richText), isoDate, chatTitle, msgId, chatId, mediaType, fileId, sourceUrl, mediaGroupId, hasMediaGroup: !!mediaGroupId } }];"
+            },
+            "id": "parse-msg",
+            "name": "ParseMsg",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                220,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "boolean": [
+                        {
+                            "value1": "={{ $json.hasMediaGroup }}",
+                            "value2": true
+                        }
+                    ]
+                }
+            },
+            "id": "check-group",
+            "name": "IsMediaGroup",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+                440,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "get",
+                "key": "=mg:{{ $json.mediaGroupId }}",
+                "options": {}
+            },
+            "id": "redis-get",
+            "name": "RedisGet",
+            "type": "n8n-nodes-base.redis",
+            "typeVersion": 1,
+            "position": [
+                660,
+                200
+            ],
+            "credentials": {
+                "redis": {
+                    "id": "eBjJMqyqFcChRMQf",
+                    "name": "Redis"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "const d = $node[\"ParseMsg\"].json;\nconst r = $input.first().json;\nconst redisVal = r?.value || r?.propertyName || null;\nconst existing = redisVal ? JSON.parse(redisVal) : { items: [], text: \"\", richText: \"[]\", chatTitle: d.chatTitle, isoDate: d.isoDate, sourceUrl: d.sourceUrl, count: 0 };\n\nif (d.fileId && !existing.items.find(i => i.fileId === d.fileId)) {\n  existing.items.push({ fileId: d.fileId, mediaType: d.mediaType });\n}\nif (d.text && !existing.text) { existing.text = d.text; existing.richText = d.richText; }\nexisting.count++;\n\nreturn [{ json: { mediaGroupId: d.mediaGroupId, data: existing, dataStr: JSON.stringify(existing), isFirst: !redisVal } }];"
+            },
+            "id": "merge-data",
+            "name": "MergeData",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                880,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "set",
+                "key": "=mg:{{ $json.mediaGroupId }}",
+                "value": "={{ $json.dataStr }}",
+                "expire": true,
+                "ttl": 30
+            },
+            "id": "redis-set",
+            "name": "RedisSet",
+            "type": "n8n-nodes-base.redis",
+            "typeVersion": 1,
+            "position": [
+                1100,
+                200
+            ],
+            "credentials": {
+                "redis": {
+                    "id": "eBjJMqyqFcChRMQf",
+                    "name": "Redis"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "boolean": [
+                        {
+                            "value1": "={{ $node[\"MergeData\"].json.isFirst }}",
+                            "value2": true
+                        }
+                    ]
+                }
+            },
+            "id": "check-first",
+            "name": "IsFirst",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+                1320,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "time": 5,
+                "unit": "seconds"
+            },
+            "id": "wait",
+            "name": "Wait",
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1.1,
+            "position": [
+                1540,
+                100
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "get",
+                "key": "=mg:{{ $node[\"MergeData\"].json.mediaGroupId }}",
+                "options": {}
+            },
+            "id": "redis-final",
+            "name": "RedisFinal",
+            "type": "n8n-nodes-base.redis",
+            "typeVersion": 1,
+            "position": [
+                1760,
+                100
+            ],
+            "credentials": {
+                "redis": {
+                    "id": "eBjJMqyqFcChRMQf",
+                    "name": "Redis"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "const r = $input.first().json;\nconst val = r?.value || r?.propertyName || null;\nif (!val) return [];\nconst d = JSON.parse(val);\nreturn [{ json: { ...d, needProcess: true } }];"
+            },
+            "id": "prep-group",
+            "name": "PrepGroup",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1980,
+                100
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const d = $input.first().json;\nreturn [{ json: { items: d.fileId ? [{ fileId: d.fileId, mediaType: d.mediaType }] : [], text: d.text, richText: d.richText, chatTitle: d.chatTitle, isoDate: d.isoDate, sourceUrl: d.sourceUrl, needProcess: true } }];"
+            },
+            "id": "prep-single",
+            "name": "PrepSingle",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                660,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const d = $input.first().json;\nif (!d.needProcess) return [];\nconst items = d.items || [];\nconst meta = JSON.stringify({ text: d.text, richText: d.richText, chatTitle: d.chatTitle, isoDate: d.isoDate, sourceUrl: d.sourceUrl });\nif (!items.length) return [{ json: { fileUrls: [], _metaStr: meta } }];\nreturn items.map((item, idx) => ({ json: { currentFileId: item.fileId, _idx: idx, _metaStr: meta } }));"
+            },
+            "id": "split-files",
+            "name": "SplitFiles",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2200,
+                250
+            ]
+        },
+        {
+            "parameters": {
+                "url": "=https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getFile?file_id={{ $json.currentFileId }}",
+                "options": {
+                    "response": {
+                        "response": {
+                            "neverError": true
+                        }
+                    }
+                }
+            },
+            "id": "get-file-path",
+            "name": "GetFilePath",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                2420,
+                250
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const items = $input.all();\nconst splitItems = $items(\"SplitFiles\");\nconst metaStr = splitItems[0]?.json?._metaStr;\nconst meta = metaStr ? JSON.parse(metaStr) : {};\n\nconst fileUrls = items.map(item => {\n  const fp = item.json.result?.file_path;\n  return fp ? `https://api.telegram.org/file/bot<TELEGRAM_BOT_TOKEN>/${fp}` : null;\n}).filter(Boolean);\n\nreturn [{ json: { text: meta.text || \"\", richText: meta.richText || \"[]\", chatTitle: meta.chatTitle || \"Unknown\", isoDate: meta.isoDate || new Date().toISOString(), sourceUrl: meta.sourceUrl, fileUrls } }];"
+            },
+            "id": "collect-urls",
+            "name": "CollectUrls",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2640,
+                250
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const d = $input.first().json;\nconst children = [];\n\nfor (const url of (d.fileUrls || [])) {\n  children.push({ object: \"block\", type: \"image\", image: { type: \"external\", external: { url } } });\n}\n\nconst text = d.text || \"\";\nconst firstNewline = text.indexOf(\"\\n\");\nconst title = firstNewline > 0 ? text.substring(0, firstNewline) : (text || \"无标题\");\nconst firstLineLen = firstNewline > 0 ? firstNewline + 1 : text.length;\n\nconst richText = d.richText ? JSON.parse(d.richText) : [];\n\n// Remove first line from richText\nlet charCount = 0;\nconst bodyRichText = [];\nfor (const item of richText) {\n  const content = item.text?.content || \"\";\n  const itemStart = charCount;\n  const itemEnd = charCount + content.length;\n  charCount = itemEnd;\n  \n  if (itemEnd <= firstLineLen) continue;\n  \n  if (itemStart < firstLineLen && itemEnd > firstLineLen) {\n    const newContent = content.substring(firstLineLen - itemStart);\n    const newItem = JSON.parse(JSON.stringify(item));\n    newItem.text.content = newContent;\n    bodyRichText.push(newItem);\n  } else {\n    bodyRichText.push(item);\n  }\n}\n\nif (bodyRichText.length && bodyRichText.some(r => r.text?.content?.trim())) {\n  children.push({ object: \"block\", type: \"paragraph\", paragraph: { rich_text: bodyRichText } });\n}\n\nif (!children.length) {\n  children.push({ object: \"block\", type: \"paragraph\", paragraph: { rich_text: [{ type: \"text\", text: { content: \"(无内容)\" } }] } });\n}\n\nconst payload = {\n  parent: { database_id: \"2de666823c4080ecb0d3f76688d78096\" },\n  properties: {\n    \"名称\": { title: [{ text: { content: title } }] },\n    \"来源频道\": { rich_text: [{ text: { content: d.chatTitle || \"Unknown\" } }] },\n    \"发布时间\": { date: { start: d.isoDate } },\n    \"消息类型\": { select: { name: d.fileUrls?.length ? \"图片\" : \"文字\" } }\n  },\n  children\n};\n\nif (d.sourceUrl) payload.properties[\"原文链接\"] = { url: d.sourceUrl };\n\nreturn [{ json: { payload } }];"
+            },
+            "id": "build-notion",
+            "name": "BuildNotion",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2860,
+                250
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "https://api.notion.com/v1/pages",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "Bearer <NOTION_TOKEN>"
+                        },
+                        {
+                            "name": "Notion-Version",
+                            "value": "2022-06-28"
+                        },
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={{ JSON.stringify($json.payload) }}",
+                "options": {}
+            },
+            "id": "write-notion",
+            "name": "WriteNotion",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                3080,
+                250
+            ]
+        }
+    ],
+    "connections": {
+        "ChannelTrigger": {
+            "main": [
+                [
+                    {
+                        "node": "ParseMsg",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "ParseMsg": {
+            "main": [
+                [
+                    {
+                        "node": "IsMediaGroup",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "IsMediaGroup": {
+            "main": [
+                [
+                    {
+                        "node": "RedisGet",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "PrepSingle",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "RedisGet": {
+            "main": [
+                [
+                    {
+                        "node": "MergeData",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "MergeData": {
+            "main": [
+                [
+                    {
+                        "node": "RedisSet",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "RedisSet": {
+            "main": [
+                [
+                    {
+                        "node": "IsFirst",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "IsFirst": {
+            "main": [
+                [
+                    {
+                        "node": "Wait",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                []
+            ]
+        },
+        "Wait": {
+            "main": [
+                [
+                    {
+                        "node": "RedisFinal",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "RedisFinal": {
+            "main": [
+                [
+                    {
+                        "node": "PrepGroup",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "PrepGroup": {
+            "main": [
+                [
+                    {
+                        "node": "SplitFiles",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "PrepSingle": {
+            "main": [
+                [
+                    {
+                        "node": "SplitFiles",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "SplitFiles": {
+            "main": [
+                [
+                    {
+                        "node": "GetFilePath",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "GetFilePath": {
+            "main": [
+                [
+                    {
+                        "node": "CollectUrls",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "CollectUrls": {
+            "main": [
+                [
+                    {
+                        "node": "BuildNotion",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "BuildNotion": {
+            "main": [
+                [
+                    {
+                        "node": "WriteNotion",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "callerPolicy": "workflowsFromSameOwner",
+        "availableInMCP": false
+    },
+    "staticData": null,
+    "meta": null,
+    "pinData": {},
+    "versionId": "428fb4e1-a700-4bc6-8c3f-b4cbb6aa7c65",
+    "activeVersionId": "428fb4e1-a700-4bc6-8c3f-b4cbb6aa7c65",
+    "versionCounter": 11,
+    "triggerCount": 1,
+    "shared": [
+        {
+            "updatedAt": "2026-01-04T14:39:02.107Z",
+            "createdAt": "2026-01-04T14:39:02.107Z",
+            "role": "workflow:owner",
+            "workflowId": "mex4ERmqLLacDfol",
+            "projectId": "7z4OPkMcdzoAlOtu",
+            "project": {
+                "updatedAt": "2025-10-16T12:38:05.754Z",
+                "createdAt": "2025-10-16T12:34:22.647Z",
+                "id": "7z4OPkMcdzoAlOtu",
+                "name": "Sion John <support@johnsion.com>",
+                "type": "personal",
+                "icon": null,
+                "description": null,
+                "creatorId": "d62a2914-96e9-4290-9cd9-816ef46798c6",
+                "projectRelations": [
+                    {
+                        "updatedAt": "2025-10-16T12:34:22.647Z",
+                        "createdAt": "2025-10-16T12:34:22.647Z",
+                        "userId": "d62a2914-96e9-4290-9cd9-816ef46798c6",
+                        "projectId": "7z4OPkMcdzoAlOtu",
+                        "user": {
+                            "updatedAt": "2026-01-14T07:13:02.000Z",
+                            "createdAt": "2025-10-16T12:34:22.332Z",
+                            "id": "d62a2914-96e9-4290-9cd9-816ef46798c6",
+                            "email": "support@johnsion.com",
+                            "firstName": "Sion",
+                            "lastName": "John",
+                            "personalizationAnswers": {
+                                "version": "v4",
+                                "personalization_survey_submitted_at": "2025-10-16T12:38:14.263Z",
+                                "personalization_survey_n8n_version": "1.115.3"
+                            },
+                            "settings": {
+                                "userActivated": true,
+                                "easyAIWorkflowOnboarded": true,
+                                "firstSuccessfulWorkflowId": "g9KuJDVqGQnQ5FKX",
+                                "userActivatedAt": 1766753499729,
+                                "npsSurvey": {
+                                    "waitingForResponse": true,
+                                    "ignoredCount": 1,
+                                    "lastShownAt": 1767579031110
+                                }
+                            },
+                            "disabled": false,
+                            "mfaEnabled": true,
+                            "lastActiveAt": "2026-01-14",
+                            "isPending": false
+                        }
+                    }
+                ]
+            }
+        }
+    ],
+    "tags": [],
+    "activeVersion": {
+        "updatedAt": "2026-01-14T07:25:15.065Z",
+        "createdAt": "2026-01-14T07:25:15.065Z",
+        "versionId": "428fb4e1-a700-4bc6-8c3f-b4cbb6aa7c65",
+        "workflowId": "mex4ERmqLLacDfol",
+        "nodes": [
+            {
+                "parameters": {
+                    "updates": [
+                        "channel_post"
+                    ],
+                    "additionalFields": {}
+                },
+                "id": "telegram-trigger",
+                "name": "ChannelTrigger",
+                "type": "n8n-nodes-base.telegramTrigger",
+                "typeVersion": 1.1,
+                "position": [
+                    0,
+                    300
+                ],
+                "credentials": {
+                    "telegramApi": {
+                        "id": "NWqf2cts29NAnfeW",
+                        "name": "Telegram Bot - TG频道同步"
+                    }
+                }
+            },
+            {
+                "parameters": {
+                    "jsCode": "const msg = $input.first().json;\nconst post = msg.channel_post || msg.message || msg;\n\nconst rawText = post.text || post.caption || \"\";\nconst entities = post.entities || post.caption_entities || [];\n\nfunction parseEntities(text, entities) {\n  if (!entities.length) return { plain: text, richText: [{ type: \"text\", text: { content: text } }] };\n  const sorted = [...entities].sort((a, b) => a.offset - b.offset);\n  const richText = [];\n  let lastEnd = 0;\n  for (const e of sorted) {\n    if (e.offset > lastEnd) {\n      richText.push({ type: \"text\", text: { content: text.substring(lastEnd, e.offset) } });\n    }\n    const content = text.substring(e.offset, e.offset + e.length);\n    if (e.type === \"text_link\" && e.url) {\n      richText.push({ type: \"text\", text: { content, link: { url: e.url } } });\n    } else if (e.type === \"url\") {\n      richText.push({ type: \"text\", text: { content, link: { url: content } } });\n    } else if (e.type === \"bold\") {\n      richText.push({ type: \"text\", text: { content }, annotations: { bold: true } });\n    } else if (e.type === \"italic\") {\n      richText.push({ type: \"text\", text: { content }, annotations: { italic: true } });\n    } else if (e.type === \"code\") {\n      richText.push({ type: \"text\", text: { content }, annotations: { code: true } });\n    } else {\n      richText.push({ type: \"text\", text: { content } });\n    }\n    lastEnd = e.offset + e.length;\n  }\n  if (lastEnd < text.length) {\n    richText.push({ type: \"text\", text: { content: text.substring(lastEnd) } });\n  }\n  return { plain: text, richText };\n}\n\nconst parsed = parseEntities(rawText, entities);\nconst text = parsed.plain;\nconst richText = parsed.richText;\n\nconst timestamp = post.date ? post.date * 1000 : Date.now();\nconst isoDate = new Date(timestamp).toISOString();\n\nlet chatTitle = \"Unknown\";\nif (post.forward_from_chat) chatTitle = post.forward_from_chat.title || \"Unknown\";\nelse if (post.chat) chatTitle = post.chat.title || \"Private\";\n\nconst msgId = post.forward_from_message_id || post.message_id || 0;\nconst chatId = post.forward_from_chat?.id || post.chat?.id || 0;\nconst mediaGroupId = post.media_group_id || null;\n\nlet mediaType = \"文字\";\nlet fileId = null;\nif (post.photo?.length) { mediaType = \"图片\"; fileId = post.photo[post.photo.length-1].file_id; }\nelse if (post.video) { mediaType = \"视频\"; fileId = post.video.file_id; }\nelse if (post.document) { mediaType = \"文件\"; fileId = post.document.file_id; }\n\nconst chatIdStr = String(chatId).replace(\"-100\", \"\");\nconst sourceUrl = chatId && msgId ? `https://t.me/c/${chatIdStr}/${msgId}` : null;\n\nreturn [{ json: { text, richText: JSON.stringify(richText), isoDate, chatTitle, msgId, chatId, mediaType, fileId, sourceUrl, mediaGroupId, hasMediaGroup: !!mediaGroupId } }];"
+                },
+                "id": "parse-msg",
+                "name": "ParseMsg",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    220,
+                    300
+                ]
+            },
+            {
+                "parameters": {
+                    "conditions": {
+                        "boolean": [
+                            {
+                                "value1": "={{ $json.hasMediaGroup }}",
+                                "value2": true
+                            }
+                        ]
+                    }
+                },
+                "id": "check-group",
+                "name": "IsMediaGroup",
+                "type": "n8n-nodes-base.if",
+                "typeVersion": 1,
+                "position": [
+                    440,
+                    300
+                ]
+            },
+            {
+                "parameters": {
+                    "operation": "get",
+                    "key": "=mg:{{ $json.mediaGroupId }}",
+                    "options": {}
+                },
+                "id": "redis-get",
+                "name": "RedisGet",
+                "type": "n8n-nodes-base.redis",
+                "typeVersion": 1,
+                "position": [
+                    660,
+                    200
+                ],
+                "credentials": {
+                    "redis": {
+                        "id": "eBjJMqyqFcChRMQf",
+                        "name": "Redis"
+                    }
+                }
+            },
+            {
+                "parameters": {
+                    "jsCode": "const d = $node[\"ParseMsg\"].json;\nconst r = $input.first().json;\nconst redisVal = r?.value || r?.propertyName || null;\nconst existing = redisVal ? JSON.parse(redisVal) : { items: [], text: \"\", richText: \"[]\", chatTitle: d.chatTitle, isoDate: d.isoDate, sourceUrl: d.sourceUrl, count: 0 };\n\nif (d.fileId && !existing.items.find(i => i.fileId === d.fileId)) {\n  existing.items.push({ fileId: d.fileId, mediaType: d.mediaType });\n}\nif (d.text && !existing.text) { existing.text = d.text; existing.richText = d.richText; }\nexisting.count++;\n\nreturn [{ json: { mediaGroupId: d.mediaGroupId, data: existing, dataStr: JSON.stringify(existing), isFirst: !redisVal } }];"
+                },
+                "id": "merge-data",
+                "name": "MergeData",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    880,
+                    200
+                ]
+            },
+            {
+                "parameters": {
+                    "operation": "set",
+                    "key": "=mg:{{ $json.mediaGroupId }}",
+                    "value": "={{ $json.dataStr }}",
+                    "expire": true,
+                    "ttl": 30
+                },
+                "id": "redis-set",
+                "name": "RedisSet",
+                "type": "n8n-nodes-base.redis",
+                "typeVersion": 1,
+                "position": [
+                    1100,
+                    200
+                ],
+                "credentials": {
+                    "redis": {
+                        "id": "eBjJMqyqFcChRMQf",
+                        "name": "Redis"
+                    }
+                }
+            },
+            {
+                "parameters": {
+                    "conditions": {
+                        "boolean": [
+                            {
+                                "value1": "={{ $node[\"MergeData\"].json.isFirst }}",
+                                "value2": true
+                            }
+                        ]
+                    }
+                },
+                "id": "check-first",
+                "name": "IsFirst",
+                "type": "n8n-nodes-base.if",
+                "typeVersion": 1,
+                "position": [
+                    1320,
+                    200
+                ]
+            },
+            {
+                "parameters": {
+                    "time": 5,
+                    "unit": "seconds"
+                },
+                "id": "wait",
+                "name": "Wait",
+                "type": "n8n-nodes-base.wait",
+                "typeVersion": 1.1,
+                "position": [
+                    1540,
+                    100
+                ]
+            },
+            {
+                "parameters": {
+                    "operation": "get",
+                    "key": "=mg:{{ $node[\"MergeData\"].json.mediaGroupId }}",
+                    "options": {}
+                },
+                "id": "redis-final",
+                "name": "RedisFinal",
+                "type": "n8n-nodes-base.redis",
+                "typeVersion": 1,
+                "position": [
+                    1760,
+                    100
+                ],
+                "credentials": {
+                    "redis": {
+                        "id": "eBjJMqyqFcChRMQf",
+                        "name": "Redis"
+                    }
+                }
+            },
+            {
+                "parameters": {
+                    "jsCode": "const r = $input.first().json;\nconst val = r?.value || r?.propertyName || null;\nif (!val) return [];\nconst d = JSON.parse(val);\nreturn [{ json: { ...d, needProcess: true } }];"
+                },
+                "id": "prep-group",
+                "name": "PrepGroup",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    1980,
+                    100
+                ]
+            },
+            {
+                "parameters": {
+                    "jsCode": "const d = $input.first().json;\nreturn [{ json: { items: d.fileId ? [{ fileId: d.fileId, mediaType: d.mediaType }] : [], text: d.text, richText: d.richText, chatTitle: d.chatTitle, isoDate: d.isoDate, sourceUrl: d.sourceUrl, needProcess: true } }];"
+                },
+                "id": "prep-single",
+                "name": "PrepSingle",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    660,
+                    400
+                ]
+            },
+            {
+                "parameters": {
+                    "jsCode": "const d = $input.first().json;\nif (!d.needProcess) return [];\nconst items = d.items || [];\nconst meta = JSON.stringify({ text: d.text, richText: d.richText, chatTitle: d.chatTitle, isoDate: d.isoDate, sourceUrl: d.sourceUrl });\nif (!items.length) return [{ json: { fileUrls: [], _metaStr: meta } }];\nreturn items.map((item, idx) => ({ json: { currentFileId: item.fileId, _idx: idx, _metaStr: meta } }));"
+                },
+                "id": "split-files",
+                "name": "SplitFiles",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    2200,
+                    250
+                ]
+            },
+            {
+                "parameters": {
+                    "url": "=https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getFile?file_id={{ $json.currentFileId }}",
+                    "options": {
+                        "response": {
+                            "response": {
+                                "neverError": true
+                            }
+                        }
+                    }
+                },
+                "id": "get-file-path",
+                "name": "GetFilePath",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [
+                    2420,
+                    250
+                ]
+            },
+            {
+                "parameters": {
+                    "jsCode": "const items = $input.all();\nconst splitItems = $items(\"SplitFiles\");\nconst metaStr = splitItems[0]?.json?._metaStr;\nconst meta = metaStr ? JSON.parse(metaStr) : {};\n\nconst fileUrls = items.map(item => {\n  const fp = item.json.result?.file_path;\n  return fp ? `https://api.telegram.org/file/bot<TELEGRAM_BOT_TOKEN>/${fp}` : null;\n}).filter(Boolean);\n\nreturn [{ json: { text: meta.text || \"\", richText: meta.richText || \"[]\", chatTitle: meta.chatTitle || \"Unknown\", isoDate: meta.isoDate || new Date().toISOString(), sourceUrl: meta.sourceUrl, fileUrls } }];"
+                },
+                "id": "collect-urls",
+                "name": "CollectUrls",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    2640,
+                    250
+                ]
+            },
+            {
+                "parameters": {
+                    "jsCode": "const d = $input.first().json;\nconst children = [];\n\nfor (const url of (d.fileUrls || [])) {\n  children.push({ object: \"block\", type: \"image\", image: { type: \"external\", external: { url } } });\n}\n\nconst text = d.text || \"\";\nconst firstNewline = text.indexOf(\"\\n\");\nconst title = firstNewline > 0 ? text.substring(0, firstNewline) : (text || \"无标题\");\nconst firstLineLen = firstNewline > 0 ? firstNewline + 1 : text.length;\n\nconst richText = d.richText ? JSON.parse(d.richText) : [];\n\n// Remove first line from richText\nlet charCount = 0;\nconst bodyRichText = [];\nfor (const item of richText) {\n  const content = item.text?.content || \"\";\n  const itemStart = charCount;\n  const itemEnd = charCount + content.length;\n  charCount = itemEnd;\n  \n  if (itemEnd <= firstLineLen) continue;\n  \n  if (itemStart < firstLineLen && itemEnd > firstLineLen) {\n    const newContent = content.substring(firstLineLen - itemStart);\n    const newItem = JSON.parse(JSON.stringify(item));\n    newItem.text.content = newContent;\n    bodyRichText.push(newItem);\n  } else {\n    bodyRichText.push(item);\n  }\n}\n\nif (bodyRichText.length && bodyRichText.some(r => r.text?.content?.trim())) {\n  children.push({ object: \"block\", type: \"paragraph\", paragraph: { rich_text: bodyRichText } });\n}\n\nif (!children.length) {\n  children.push({ object: \"block\", type: \"paragraph\", paragraph: { rich_text: [{ type: \"text\", text: { content: \"(无内容)\" } }] } });\n}\n\nconst payload = {\n  parent: { database_id: \"2de666823c4080ecb0d3f76688d78096\" },\n  properties: {\n    \"名称\": { title: [{ text: { content: title } }] },\n    \"来源频道\": { rich_text: [{ text: { content: d.chatTitle || \"Unknown\" } }] },\n    \"发布时间\": { date: { start: d.isoDate } },\n    \"消息类型\": { select: { name: d.fileUrls?.length ? \"图片\" : \"文字\" } }\n  },\n  children\n};\n\nif (d.sourceUrl) payload.properties[\"原文链接\"] = { url: d.sourceUrl };\n\nreturn [{ json: { payload } }];"
+                },
+                "id": "build-notion",
+                "name": "BuildNotion",
+                "type": "n8n-nodes-base.code",
+                "typeVersion": 2,
+                "position": [
+                    2860,
+                    250
+                ]
+            },
+            {
+                "parameters": {
+                    "method": "POST",
+                    "url": "https://api.notion.com/v1/pages",
+                    "sendHeaders": true,
+                    "headerParameters": {
+                        "parameters": [
+                            {
+                                "name": "Authorization",
+                                "value": "Bearer <NOTION_TOKEN>"
+                            },
+                            {
+                                "name": "Notion-Version",
+                                "value": "2022-06-28"
+                            },
+                            {
+                                "name": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ]
+                    },
+                    "sendBody": true,
+                    "specifyBody": "json",
+                    "jsonBody": "={{ JSON.stringify($json.payload) }}",
+                    "options": {}
+                },
+                "id": "write-notion",
+                "name": "WriteNotion",
+                "type": "n8n-nodes-base.httpRequest",
+                "typeVersion": 4.2,
+                "position": [
+                    3080,
+                    250
+                ]
+            }
+        ],
+        "connections": {
+            "ChannelTrigger": {
+                "main": [
+                    [
+                        {
+                            "node": "ParseMsg",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "ParseMsg": {
+                "main": [
+                    [
+                        {
+                            "node": "IsMediaGroup",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "IsMediaGroup": {
+                "main": [
+                    [
+                        {
+                            "node": "RedisGet",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ],
+                    [
+                        {
+                            "node": "PrepSingle",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "RedisGet": {
+                "main": [
+                    [
+                        {
+                            "node": "MergeData",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "MergeData": {
+                "main": [
+                    [
+                        {
+                            "node": "RedisSet",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "RedisSet": {
+                "main": [
+                    [
+                        {
+                            "node": "IsFirst",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "IsFirst": {
+                "main": [
+                    [
+                        {
+                            "node": "Wait",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ],
+                    []
+                ]
+            },
+            "Wait": {
+                "main": [
+                    [
+                        {
+                            "node": "RedisFinal",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "RedisFinal": {
+                "main": [
+                    [
+                        {
+                            "node": "PrepGroup",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "PrepGroup": {
+                "main": [
+                    [
+                        {
+                            "node": "SplitFiles",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "PrepSingle": {
+                "main": [
+                    [
+                        {
+                            "node": "SplitFiles",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "SplitFiles": {
+                "main": [
+                    [
+                        {
+                            "node": "GetFilePath",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "GetFilePath": {
+                "main": [
+                    [
+                        {
+                            "node": "CollectUrls",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "CollectUrls": {
+                "main": [
+                    [
+                        {
+                            "node": "BuildNotion",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            },
+            "BuildNotion": {
+                "main": [
+                    [
+                        {
+                            "node": "WriteNotion",
+                            "type": "main",
+                            "index": 0
+                        }
+                    ]
+                ]
+            }
+        },
+        "authors": "Sion John",
+        "name": null,
+        "description": null,
+        "autosaved": false,
+        "workflowPublishHistory": [
+            {
+                "createdAt": "2026-01-14T07:25:25.820Z",
+                "id": 6,
+                "workflowId": "mex4ERmqLLacDfol",
+                "versionId": "428fb4e1-a700-4bc6-8c3f-b4cbb6aa7c65",
+                "event": "activated",
+                "userId": "d62a2914-96e9-4290-9cd9-816ef46798c6"
+            }
+        ]
+    }
+}
