@@ -4,7 +4,7 @@
 自动将 Telegram 频道消息同步到 Notion Database，支持文字、图片（多图合并）、视频、文件等消息类型。
 
 ## 服务器信息
-- **服务器 IP**: 23.19.230.202
+- **服务器 IP**: `<YOUR_SERVER_IP>`
 - **SSH 端口**: 22
 - **部署目录**: `/srv/n8n-compose/`
 

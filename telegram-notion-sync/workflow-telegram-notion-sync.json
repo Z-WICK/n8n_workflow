@@ -1,5 +1,5 @@
 {
-    "updatedAt": "2026-01-14T07:25:15.060Z",
+    "updatedAt": "2026-01-22T16:34:03.628Z",
     "createdAt": "2026-01-04T14:39:02.099Z",
     "id": "mex4ERmqLLacDfol",
     "name": "Telegram频道同步到Notion",
@@ -478,9 +478,9 @@
     "staticData": null,
     "meta": null,
     "pinData": {},
-    "versionId": "428fb4e1-a700-4bc6-8c3f-b4cbb6aa7c65",
-    "activeVersionId": "428fb4e1-a700-4bc6-8c3f-b4cbb6aa7c65",
-    "versionCounter": 11,
+    "versionId": "b49a1013-01f9-4414-8b99-146c75820d6a",
+    "activeVersionId": "b49a1013-01f9-4414-8b99-146c75820d6a",
+    "versionCounter": 53,
     "triggerCount": 1,
     "shared": [
         {
@@ -505,7 +505,7 @@
                         "userId": "d62a2914-96e9-4290-9cd9-816ef46798c6",
                         "projectId": "7z4OPkMcdzoAlOtu",
                         "user": {
-                            "updatedAt": "2026-01-14T07:13:02.000Z",
+                            "updatedAt": "2026-01-22T16:31:42.000Z",
                             "createdAt": "2025-10-16T12:34:22.332Z",
                             "id": "d62a2914-96e9-4290-9cd9-816ef46798c6",
                             "email": "support@johnsion.com",
@@ -529,7 +529,7 @@
                             },
                             "disabled": false,
                             "mfaEnabled": true,
-                            "lastActiveAt": "2026-01-14",
+                            "lastActiveAt": "2026-01-23",
                             "isPending": false
                         }
                     }
@@ -539,9 +539,9 @@
     ],
     "tags": [],
     "activeVersion": {
-        "updatedAt": "2026-01-14T07:25:15.065Z",
-        "createdAt": "2026-01-14T07:25:15.065Z",
-        "versionId": "428fb4e1-a700-4bc6-8c3f-b4cbb6aa7c65",
+        "updatedAt": "2026-01-22T16:34:03.630Z",
+        "createdAt": "2026-01-22T16:34:03.630Z",
+        "versionId": "b49a1013-01f9-4414-8b99-146c75820d6a",
         "workflowId": "mex4ERmqLLacDfol",
         "nodes": [
             {
@@ -1013,11 +1013,27 @@
         "autosaved": false,
         "workflowPublishHistory": [
             {
-                "createdAt": "2026-01-14T07:25:25.820Z",
-                "id": 6,
+                "createdAt": "2026-01-22T16:34:05.109Z",
+                "id": 25,
                 "workflowId": "mex4ERmqLLacDfol",
-                "versionId": "428fb4e1-a700-4bc6-8c3f-b4cbb6aa7c65",
+                "versionId": "b49a1013-01f9-4414-8b99-146c75820d6a",
                 "event": "activated",
+                "userId": "d62a2914-96e9-4290-9cd9-816ef46798c6"
+            },
+            {
+                "createdAt": "2026-01-22T16:34:10.999Z",
+                "id": 27,
+                "workflowId": "mex4ERmqLLacDfol",
+                "versionId": "b49a1013-01f9-4414-8b99-146c75820d6a",
+                "event": "activated",
+                "userId": "d62a2914-96e9-4290-9cd9-816ef46798c6"
+            },
+            {
+                "createdAt": "2026-01-22T16:34:07.383Z",
+                "id": 26,
+                "workflowId": "mex4ERmqLLacDfol",
+                "versionId": "b49a1013-01f9-4414-8b99-146c75820d6a",
+                "event": "deactivated",
                 "userId": "d62a2914-96e9-4290-9cd9-816ef46798c6"
             }
         ]
